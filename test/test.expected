@@ -1,0 +1,19 @@
+===== Encoded test.bib =====
+@string{
+  hello=world,
+  this=is
+}
+@comment{A little comment to discuss foo bar baz}
+@inproceedings{pike1990plan,
+  title={Plan 9 from {Bell Labs}},
+  author={Pike, Rob and Presotto, Dave and Thompson, Ken and Trickey, Howard and others},
+  booktitle={Proceedings of the summer 1990 UKUUG Conference},
+  pages={1--9},
+  year={1990},
+  month=jan,
+  organization={London, UK}
+}
+===== Encoded test2.bib =====
+@string{
+  hello=world
+}

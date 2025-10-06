@@ -1,0 +1,4 @@
+(test
+ (name test)
+ (deps test.bib test2.bib)
+ (libraries bib))
