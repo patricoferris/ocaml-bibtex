@@ -14,6 +14,7 @@ depends: [
   "ocaml"
   "bytesrw"
   "fmt"
+  "mdx" {with-test}
   "odoc" {with-doc}
 ]
 build: [

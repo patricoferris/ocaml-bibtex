@@ -22,7 +22,8 @@
  (depends
    ocaml
    bytesrw
-   fmt)
+   fmt
+   (mdx :with-test))
  (tags
   ("bibtex")))
 
