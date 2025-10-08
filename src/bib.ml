@@ -8,20 +8,14 @@ open Bytesrw
 
 (* Base Bibtex types *)
 module Raw = struct
-  module Kv : sig
-    type 'a t
-
-    val empty : 'a t
-
-    val add : string -> 'a -> 'a t -> 'a t
-
-    val to_list : 'a t -> (string * 'a) list
-  end = struct
+  module Kv = struct
     type 'a t = (string * 'a) list
 
     let empty = []
 
     let add k v t = (k, v) :: t 
+
+    let find = List.assoc_opt
 
     let to_list t = List.rev t
   end
@@ -55,6 +49,19 @@ module Raw = struct
   type t = entry list
 
   let pp fmt = Fmt.list ~sep:(Fmt.any "\n") pp_entry fmt
+
+  let fold_entries ?type' fn t acc =
+    let rec loop acc = function
+      | [] -> acc
+      | String _ :: es | Preamble _ :: es | Comment _ :: es -> loop acc es
+      | Entry { type' = type2; citation_key; tags } :: es ->
+          let skip = Option.map (fun t -> not (t = type2)) type' |> Option.value ~default:false in
+          if skip then loop acc es
+          else
+            let acc2 = fn ~citation_key tags acc in
+            loop acc2 es
+    in
+    loop acc t
 end
 
 (* Parser *)

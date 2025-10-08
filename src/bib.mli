@@ -42,6 +42,10 @@ module Raw : sig
     type 'a t
 
     val to_list : 'a t -> (string * 'a) list
+    (** [to_list kv] converts [kv] to an association list. *)
+
+    val find : string -> 'a t -> 'a option
+    (** [find key kv] looks for [key] in [kv]. *)
   end
 
   type text
@@ -61,6 +65,10 @@ module Raw : sig
   
   type t = entry list
   (** A representation of a Bibtex file *)
+
+  val fold_entries : ?type':string -> (citation_key:string -> text Kv.t -> 'acc -> 'acc) -> t -> 'acc -> 'acc
+  (** [fold ?type' fn t] folds over the entries of [t] using [fn]. You can supply
+      an optional [type'] to filter by (e.g. [~type':"article"]). *)
 
   val pp : t Fmt.t
   (** A pretty printer *)

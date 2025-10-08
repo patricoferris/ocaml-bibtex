@@ -17,3 +17,5 @@
 @string{
   hello=world
 }
+===== inproceedings_authors test.bib =====
+Pike, Rob and Presotto, Dave and Thompson, Ken and Trickey, Howard and others
