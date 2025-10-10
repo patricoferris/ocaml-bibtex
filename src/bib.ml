@@ -5,6 +5,7 @@
    SPDX-License-Identifier: ISC
   ---------------------------------------------------------------------------*)
 open Bytesrw
+open Astring
 
 (* Base Bibtex types *)
 module Raw = struct
@@ -16,6 +17,14 @@ module Raw = struct
     let add k v t = (k, v) :: t 
 
     let find = List.assoc_opt
+
+    let find_and_remove k assoc =
+      let rec loop acc = function
+        | [] -> raise Not_found
+        | (k', v) :: rest when k = k' -> v, List.rev acc @ rest
+        | x :: xs -> loop (x :: acc) xs
+      in
+      loop [] assoc
 
     let to_list t = List.rev t
   end
@@ -63,6 +72,217 @@ module Raw = struct
     in
     loop acc t
 end
+
+(* Parsed entries defined by LaTeX *)
+
+module Name = struct 
+  type t = { first : string; last : string; suffix : string option }
+
+  let v ?suffix ~first ~last () = { first; last; suffix }
+
+  let first t = t.first
+  let last t = t.last
+  let suffix t = t.suffix
+
+  let of_string s =
+    match String.cuts ~sep:"," s with
+    | [ fullname ] -> (
+      match String.cuts ~sep:" " (String.trim fullname) |> List.filter (fun s -> not (String.equal s "")) with
+      | [ first; last ] -> { first; last; suffix = None }
+      | _ -> Fmt.invalid_arg "Expected <firstname> <lastname> but got: %s" s
+    )
+    | [ last; first ] -> { first = String.trim first; last = String.trim last; suffix = None }
+    | [ last; suffix; first ] -> { first = String.trim first; last = String.trim last; suffix = Some (String.trim suffix) }
+    | _ -> Fmt.invalid_arg "Too many commas in name: %s" s
+
+  let display t = match t.suffix with
+    | None -> t.first ^ " " ^ t.last
+    | Some suffix ->  t.first ^ " " ^ t.last ^ " " ^ suffix
+
+  let to_bibtex t = match t.suffix with
+    | None -> Fmt.str "%s, %s" t.last t.first
+    | Some suffix -> Fmt.str "%s, %s, %s" t.last suffix t.first
+end
+
+let names s =
+  String.cuts ~sep:" and " s
+   |> List.filter (fun s -> not (String.is_empty s))
+   |> List.map String.trim
+   |> List.map Name.of_string
+
+let names_to_bibtex =
+  let rec loop acc = function
+    | [] -> acc
+    | [ name ] -> acc ^ Name.to_bibtex name
+    | name :: names ->
+      let acc = acc ^ Name.to_bibtex name ^ " and " in
+      loop acc names
+  in
+  loop ""
+
+
+let kv_add_text ?(delimiter=Some `Curly) ~key ~value =
+  Raw.Kv.add key { Raw.text = value; delimiter } 
+
+module Article = struct
+  type t = {
+    author : Name.t list;
+    title : string;
+    journal : string;
+    year : int;
+    volume : int option;
+    number : int option;
+    pages : int option;
+    month : string option;
+    note : string option;
+  }
+
+  let v ?volume ?number ?pages ?month ?note ~author ~journal ~year title =
+    { author; title; journal; year; volume; number; pages; month; note }
+
+  let author t = t.author
+  let title t = t.title
+  let year t = t.year
+  let journal t = t.journal
+  let volume t = t.volume
+  let number t = t.number
+  let pages t = t.pages
+  let month t = t.month
+  let note t = t.note
+
+  let to_kv t : Raw.text Raw.Kv.t =
+    Raw.Kv.empty
+    |> kv_add_text ~key:"author" ~value:(names_to_bibtex t.author)
+    |> kv_add_text ~key:"title" ~value:t.title
+    |> kv_add_text ~delimiter:None ~key:"year" ~value:(string_of_int t.year)
+    |> kv_add_text ~key:"journal" ~value:t.journal
+
+end
+
+module Inproceedings = struct
+  type t = {
+    author : Name.t list;
+    title : string;
+    booktitle : string;
+    year : int;
+  }
+  
+  let v ~author ~booktitle ~year title = { author; title; booktitle; year }
+
+  let author t = t.author
+  let title t = t.title
+  let year t = t.year
+  let booktitle t = t.booktitle
+
+  let to_kv t : Raw.text Raw.Kv.t =
+    Raw.Kv.empty
+    |> kv_add_text ~key:"author" ~value:(names_to_bibtex t.author)
+    |> kv_add_text ~key:"title" ~value:t.title
+    |> kv_add_text ~delimiter:None ~key:"year" ~value:(string_of_int t.year)
+    |> kv_add_text ~key:"booktitle" ~value:t.booktitle
+end
+
+type 'a with_extra_tags = 'a * Raw.text Raw.Kv.t
+
+type entry =
+  | Article of Article.t with_extra_tags
+  | Inproceedings of Inproceedings.t with_extra_tags
+  | Other of string with_extra_tags
+
+type t = (string * entry) list
+
+let article ?(extra=Raw.Kv.empty) a = Article (a, extra)
+let inproceedings ?(extra=Raw.Kv.empty) a = Inproceedings (a, extra)
+
+let err_lookup field e = 
+  Failure (Fmt.str "No field %s in %a" field Raw.pp_kv e)
+
+let find_exn k (e : Raw.text Raw.Kv.t) =
+  try Raw.Kv.find_and_remove k e |> fun (f, s) -> Raw.text f, s
+  with Not_found -> 
+    let bt = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace (err_lookup k e) bt
+
+let of_raw : Raw.t -> t = fun es ->
+  let convert (e : Raw.entry) : (string * entry) option = match e with
+    | String _ | Preamble _ | Comment _ -> None
+    | Entry e ->
+      let citation_key = e.citation_key in
+      match e.type' with
+      | "article" ->
+        let s_author, acc = find_exn "author" e.tags in
+        let author = names s_author in
+        let title, acc = find_exn "title" acc in 
+        let journal, acc = find_exn "journal" acc in 
+        let year, acc = find_exn "year" acc in 
+        let v = Article.v ~author ~year:(int_of_string year) ~journal title in
+        Some (citation_key, Article (v, acc))
+      | "inproceedings" ->
+        let s_author, acc = find_exn "author" e.tags in
+        let author = names s_author in
+        let title, acc = find_exn "title" acc in 
+        let year, acc = find_exn "year" acc in 
+        let v = Inproceedings.v ~author ~year:(int_of_string year) ~booktitle:"" title in
+        Some (citation_key, Inproceedings (v, acc))
+      | type' -> Some (citation_key, Other (type', e.tags)) 
+    in
+    List.filter_map convert es
+
+let to_raw : t -> Raw.t = fun ts ->
+  let convert ~citation_key (e : entry) : Raw.entry = match e with 
+    | Article (article, e) ->
+      let tags = Article.to_kv article @ e in
+      Entry { type' = "article"; citation_key; tags } 
+    | Inproceedings (proc, e) ->
+      let tags = Inproceedings.to_kv proc @ e in
+      Entry { type' = "inproceedings"; citation_key; tags } 
+    | Other (type', tags) ->
+      Entry { type'; citation_key; tags } 
+  in
+  List.map (fun (citation_key, e) -> convert ~citation_key e) ts
+
+(* Common fields across entries *)
+let type' = function
+  | Article _ -> "article" 
+  | Inproceedings _ -> "inproceedings"
+  | Other (s, _) -> s
+
+let extra = function
+  | Article (_, e) -> e
+  | Inproceedings (_, e) -> e
+  | Other (_, e) -> e
+
+let author = function
+  | Article (a, _) -> Article.author a
+  | Inproceedings (a, _) -> Inproceedings.author a
+  | v ->
+    Raw.Kv.find "author" (extra v) 
+    |> Option.map Raw.text
+    |> Option.map names
+    |> Option.value ~default:[] 
+
+let title = function
+  | Article (a, _) -> Some (Article.title a)
+  | Inproceedings (a, _) -> Some (Inproceedings.title a)
+  | v -> 
+    Raw.Kv.find "title" (extra v) 
+    |> Option.map Raw.text
+
+let year  = function
+  | Article (a, _) -> Some (Article.year a)
+  | Inproceedings (a, _) -> Some (Inproceedings.year a)
+  | v ->
+    Raw.Kv.find "title" (extra v)
+    |> Option.map Raw.text
+    |> fun v -> Option.bind v int_of_string_opt
+
+let journal = function
+  | Article (a, _) -> Some (Article.journal a)
+  | v -> Raw.Kv.find "journal" (extra v) |> Option.map Raw.text
+
+let doi e = extra e |> Raw.Kv.find "doi" |> Option.map Raw.text
+let abstract e = extra e |> Raw.Kv.find "abstract" |> Option.map Raw.text
+let url e = extra e |> Raw.Kv.find "url" |> Option.map Raw.text
 
 (* Parser *)
 module Textloc = struct
@@ -138,6 +358,7 @@ let[@inline] is_digit u = 0x0030 (* 0 *) <= u && u <= 0x0039 (* 9 *)
 let[@inline] is_text u = 
   (0x0061 (* a *) <= u && u <= 0x007A (* z *)) ||
   (0x0041 (* A *) <= u && u <= 0x005A (* Z *))
+let[@inline] is_underscore u = Int.equal u 95 
 
 let make_decoder ?(filename = "-") reader =
   let token = Buffer.create 255 in
@@ -169,13 +390,14 @@ let err_illegal_ctrl_char ~first_byte ~first_line d =
   err_to_here ~first_byte ~first_line d "Illegal control character '%#x'" d.c 
 
 let err_malformed_key ~first_byte ~first_line d =
-  err_to_here ~first_byte ~first_line d "Malformed key, got a '%c'" (Char.unsafe_chr d.c) 
+  err_to_here ~first_byte ~first_line d "Malformed key, got a '%c'" (Stdlib.Char.unsafe_chr d.c) 
 
 let err_malformed_kv ~first_byte ~first_line d =
-  err_to_here ~first_byte ~first_line d "Malformed set of key-values" (Char.unsafe_chr d.c) 
+  err_to_here ~first_byte ~first_line d "Malformed set of key-values" (Stdlib.Char.unsafe_chr d.c) 
 
 let err_unexpected_character ~first_byte ~first_line e d =
-  err_to_here ~first_byte ~first_line d "Unexpected character, expected '%c' but got '%c'" (Char.unsafe_chr e) (Char.unsafe_chr d.c) 
+  err_to_here ~first_byte ~first_line d 
+    "Unexpected character, expected '%c' but got '%c'" (Stdlib.Char.unsafe_chr e) (Stdlib.Char.unsafe_chr d.c) 
 
 (* Decode next character in d.u *)
 let[@inline] is_eod d = d.i_max = - 1 (* Only happens on Slice.eod *)
@@ -186,6 +408,7 @@ let[@inline] set_slice d slice =
   d.i_max <- d.i_next + Bytes.Slice.length slice - 1
 
 let rec nextc d =
+  let first_byte = get_last_byte d and first_line = get_line_pos d in
   let a = available d in
   if a <= 0 then
     (if is_eod d
@@ -196,7 +419,7 @@ let rec nextc d =
   d.c <- match b with
   | '\x00' .. '\x09' | '\x0B' | '\x0E' .. '\x7F' as u -> (* ASCII fast path *)
       d.i_next <- d.i_next + 1; d.byte_count <- d.byte_count + 1;
-      Char.code u
+      Stdlib.Char.code u
   | '\x0D' (* CR *) ->
       d.i_next <- d.i_next + 1; d.byte_count <- d.byte_count + 1;
       d.line_start <- d.byte_count; d.line <- d.line + 1;
@@ -206,16 +429,17 @@ let rec nextc d =
       d.line_start <- d.byte_count;
       if d.c <> 0x000D then d.line <- d.line + 1;
       0x000A
-  | _ -> failwith "Unsupported encoding, please use ASCII"
+  | c ->
+    err_to_here ~first_line ~first_byte d "Unsupported encoding, please use ASCII with LaTeX. Got %i." (Stdlib.Char.code c)
 
 let[@inline] token_clear d = Buffer.clear d.token
 let[@inline] token_pop d = let t = Buffer.contents d.token in (token_clear d; t)
-let[@inline] token_add d u = Buffer.add_char d.token (Char.unsafe_chr u)
+let[@inline] token_add d u = Buffer.add_char d.token (Stdlib.Char.unsafe_chr u)
 let[@inline] accept d = token_add d d.c; nextc d
 
 (* Whitespace *)
 let[@inline] is_ws u =
-  if u > 0x20 then false else match Char.unsafe_chr u with
+  if u > 0x20 then false else match Stdlib.Char.unsafe_chr u with
   | ' ' | '\t' | '\r' | '\n' -> true
   | _ -> false
 
@@ -267,7 +491,7 @@ let consume_kv d =
         | 0x003D -> nextc d; v
         | _ -> err_malformed_key ~first_byte ~first_line d
     )
-    | v when is_text v || is_digit v ->
+    | v when is_text v || is_digit v || is_underscore v ->
       token_add d v; nextc d; key_loop d
     | _ -> err_malformed_key ~first_byte ~first_line d  
   in
@@ -303,7 +527,7 @@ let readc c d =
   else err_unexpected_character ~first_byte ~first_line c d
 
 let read_left_curly = readc 0x007B
-let read_comma = readc 0x002C
+let read_comma = readc 0x002c
 
 let consume_preamble _ = Preamble "TODO"
 
@@ -317,7 +541,15 @@ let consume_comment d =
   let cmt = consume_delimited_word ~delimiter:0x007D d in
   Comment cmt
 
-let consume_citation_key = consume_word
+let is_ascii i = 0 <= i && i <= 255
+let is_comma = Int.equal 0x002c  
+
+let consume_citation_key d = 
+  let rec loop d =
+    if is_ascii d.c && not (is_comma d.c) then (accept d; loop d)
+  in
+  loop d;
+  token_pop d
 
 let consume_entry ~type' d = 
   read_left_curly d;
@@ -333,7 +565,7 @@ let consume_entry d =
   match (read_ws d; d.c) with
   | 0x0040 (* @ *) -> (
     nextc d;
-    match consume_word d |> String.lowercase_ascii with
+    match consume_word d |> Stdlib.String.lowercase_ascii with
     | "premable" -> consume_preamble d
     | "string" -> consume_string d
     | "comment" -> consume_comment d

@@ -22,6 +22,7 @@
  (depends
    ocaml
    bytesrw
+   astring
    fmt
    (mdx :with-test))
  (tags
