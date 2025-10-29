@@ -9,7 +9,7 @@ OCaml representations of Bibtex entries.
 `Bib` is not yet released. You will have to pin it to use it.
 
 ```
-opam pin git+https://github.com/patricoferris/bibtex
+opam pin git+https://github.com/patricoferris/ocaml-bibtex
 ```
 
 
