@@ -679,3 +679,7 @@ let encode ?buf v w =
   let e = make_encoder ?buf w in
   List.iter (write_entry e) v;
   write_eot ~eod:true e 
+
+let of_string ?(filename="of_string") s =
+  decode ~filename (Bytes.Reader.of_string s)
+  |> of_raw

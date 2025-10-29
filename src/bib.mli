@@ -92,7 +92,8 @@ val encode : ?buf:Bytes.t -> Raw.t -> Bytes.Writer.t -> unit
     convert {! Raw.t}s into them using {! of_raw}.
  *)
 
-(** Names, for people *)
+(** Names, for people
+    @inline *)
 module Name : sig
   type t
   (** An author's name *)
@@ -215,6 +216,11 @@ val article : ?extra:Raw.text Raw.Kv.t -> Article.t -> entry
 val inproceedings : ?extra:Raw.text Raw.Kv.t -> Inproceedings.t -> entry
 (** Create a new inproceedings entry *)
 
+(** {3 Utilities} *)
+
+val of_string : ?filename:string -> string -> t
+(** [of_string t] parses a bibtex file from [s] *) 
+
 val of_raw : Raw.t -> t
 (** [of_raw raw] converts a set of raw entries (most likely from {! decode}).
 
@@ -308,7 +314,6 @@ exception Error of Error.t
     For example:
     
     {@ocaml[
-
       # format {|@string{ key="unclosed }|};;
       Exception: File "-", line 1, characters 14-25: Unclosed string
     ]} *)

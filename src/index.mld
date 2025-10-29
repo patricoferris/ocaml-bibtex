@@ -1,0 +1,20 @@
+{1 Bib}
+
+Welcome to {! Bib}, a library for manipulating Bibtex files.
+
+{2 Quick Start}
+
+Most users want to read in a Bibtex file and manipulate it in some way. The
+easiest way to do this is with {! Bib.of_string}.
+
+{@ocaml[
+  # let v = Bib.of_string "@misc{key, title={Misc.}}"
+  val v : Bib.t = [("key", Bib.Other ("misc", <abstr>))]
+]}
+
+With a {! Bib.t} in your hand you can then map over it and produce new values.
+
+{@ocaml[
+  # let titles = List.filter_map (fun (_, o) -> Bib.title o) v;;
+  val titles : string list = ["Misc."]
+]}

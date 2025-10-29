@@ -1,8 +1,11 @@
 (mdx
-  (files bib.mli)
+  (files index.mld bib.mli)
   (libraries bib bytesrw astring))
 
 (library
  (libraries fmt bytesrw astring)
  (public_name bib)
  (name bib))
+
+(documentation
+  (package bib))
