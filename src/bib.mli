@@ -221,6 +221,10 @@ val inproceedings : ?extra:Raw.text Raw.Kv.t -> Inproceedings.t -> entry
 val of_string : ?filename:string -> string -> t
 (** [of_string t] parses a bibtex file from [s] *) 
 
+val to_string : ?buf:Buffer.t -> t -> string
+(** A counterpart to {! of_string}. See the {!page-index.quick_start} guide for more information.
+    A user may supply their own empty buffer to use to write the data to. *)
+
 val of_raw : Raw.t -> t
 (** [of_raw raw] converts a set of raw entries (most likely from {! decode}).
 

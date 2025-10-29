@@ -2,7 +2,7 @@
 
 Welcome to {! Bib}, a library for manipulating Bibtex files.
 
-{2 Quick Start}
+{2:quick_start Quick Start}
 
 Most users want to read in a Bibtex file and manipulate it in some way. The
 easiest way to do this is with {! Bib.of_string}.
@@ -17,4 +17,24 @@ With a {! Bib.t} in your hand you can then map over it and produce new values.
 {@ocaml[
   # let titles = List.filter_map (fun (_, o) -> Bib.title o) v;;
   val titles : string list = ["Misc."]
+]}
+
+If you need to build a Bibtex database by hand, you can do it either using the
+constructors directly or the functions provided in {! Bib}.
+
+{@ocaml[
+  # let author = [Bib.Name.of_string "Alice Camel"];;
+  val author : Bib.Name.t list = [<abstr>]
+  # let article = 
+      Bib.Article.v
+     ~year:2024 ~journal:"Journal" ~author "My nice article";;
+  val article : Bib.Article.t = <abstr>
+  # Format.printf "%s%!" (Bib.to_string [ "citation-key", Bib.article article ]);;
+  @article{citation-key,
+    author={Camel, Alice},
+    title={My nice article},
+    year=2024,
+    journal={Journal}
+  }
+  - : unit = ()
 ]}

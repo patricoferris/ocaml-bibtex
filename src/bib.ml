@@ -683,3 +683,8 @@ let encode ?buf v w =
 let of_string ?(filename="of_string") s =
   decode ~filename (Bytes.Reader.of_string s)
   |> of_raw
+
+let to_string ?(buf=Buffer.create 16) s =
+  let writer = Bytes.Writer.of_buffer buf in
+  encode (to_raw s) writer;
+  Buffer.contents buf
