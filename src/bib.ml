@@ -272,7 +272,7 @@ let year  = function
   | Article (a, _) -> Some (Article.year a)
   | Inproceedings (a, _) -> Some (Inproceedings.year a)
   | v ->
-    Raw.Kv.find "title" (extra v)
+    Raw.Kv.find "year" (extra v)
     |> Option.map Raw.text
     |> fun v -> Option.bind v int_of_string_opt
 

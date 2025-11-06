@@ -13,12 +13,12 @@
 
 (license ISC)
 
-(documentation https://url/to/documentation)
+(documentation https://ocaml.org/p/bib)
 
 (package
  (name bib)
- (synopsis "OCaml Bibtex Parser")
- (description "A longer description")
+ (synopsis "OCaml Bibtex Codec")
+ (description "A simple encoder and decoder for the Bibtex citation format.")
  (depends
    ocaml
    bytesrw
