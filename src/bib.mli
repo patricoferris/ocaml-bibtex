@@ -48,14 +48,30 @@ module Raw : sig
     (** [find key kv] looks for [key] in [kv]. *)
   end
 
+  type part
+  (** A single component of a value with its delimiter info. *)
+
+  val part : ?delimiter:bool -> part -> string
+  (** [part ?delimiter p] returns the text content of a single part.
+      If [delimiter] is [true], includes the delimiter in the output,
+      e.g. ["foo"] for [Dquote], [{bar}] for [Curly], or [baz] for bare words.
+      Defaults to [false]. *)
+
+  val delimiter : part -> [ `Curly | `Dquote | `None ]
+  (** [delimiter p] returns the delimiter type for a single part. *)
+
   type text
   (** Raw strings from the Bibtex file *)
 
   val text : text -> string
-  (** The string value of the entry *)
+  (** [text v] returns the concatenated text of all value parts.
+      For single-part values, this is the original text.
+      For multi-part values, parts are joined without the separator, so
+      make sure to put the necessary whitespace in the surrounding values.
+      Example: ["OCaml" # "Rocks"] returns ["OCamlRocks"]. *)
 
-  val delimiter : text -> [ `Curly | `Dquote ] option
-  (** The delimiter for the text (e.g. [hello={world}] is [Some `Dquote]). *)
+  val parts : text -> part list
+  (** [parts v] returns the individual parts of a text value. *)
 
   type entry =
     | String of text Kv.t
