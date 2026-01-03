@@ -29,10 +29,19 @@ module Raw = struct
     let to_list t = List.rev t
   end
 
-  type text = { text : string; delimiter : [ `Curly | `Dquote ] option }
+  type part = { text : string; delimiter : [ `Curly | `Dquote | `None ] }
 
-  let text t = t.text
-  let delimiter t = t.delimiter
+  type text = part list
+
+  let text t = String.concat ~sep:"" (List.map (fun p -> p.text) t)
+
+  let parts t = t
+  let delimiter p = p.delimiter
+  let part ?(delimiter=false) p =
+    match delimiter, p.delimiter with
+    | false, _ | true, `None -> p.text
+    | true, `Curly -> Printf.sprintf "{%s}" p.text
+    | true, `Dquote -> Printf.sprintf "\"%s\"" p.text (* TODO: is any quoting of raw text needed? *)
 
   type entry =
     | String of text Kv.t
@@ -41,10 +50,15 @@ module Raw = struct
     | Entry of { type' : string; citation_key : string; tags : text Kv.t }
 
   let pp_kv fmt k =
-    let pp_txt fmt { text; delimiter }= match delimiter with
-      | None -> Fmt.string fmt text
-      | Some `Curly -> Fmt.pf fmt "{%s}" text 
-      | Some `Dquote -> Fmt.quote Fmt.string fmt text
+    let pp_part fmt { text; delimiter } = match delimiter with
+      | `None -> Fmt.string fmt text
+      | `Curly -> Fmt.pf fmt "{%s}" text
+      | `Dquote -> Fmt.quote Fmt.string fmt text
+    in
+    let pp_txt fmt = function
+      | [] -> ()
+      | [part] -> pp_part fmt part
+      | parts -> Fmt.pf fmt "%a" Fmt.(list ~sep:(Fmt.any " # ") pp_part) parts
     in
     Fmt.pf fmt "%a" Fmt.(list ~sep:(Fmt.any ",@\n") (fun ppf (k, v) -> Fmt.pf ppf "%s=%a" k pp_txt v)) (Kv.to_list k) 
 
@@ -121,8 +135,8 @@ let names_to_bibtex =
   loop ""
 
 
-let kv_add_text ?(delimiter=Some `Curly) ~key ~value =
-  Raw.Kv.add key { Raw.text = value; delimiter } 
+let kv_add_text ?(delimiter=`Curly) ~key ~value =
+  Raw.Kv.add key [{ Raw.text = value; delimiter }]
 
 module Article = struct
   type t = {
@@ -154,7 +168,7 @@ module Article = struct
     Raw.Kv.empty
     |> kv_add_text ~key:"author" ~value:(names_to_bibtex t.author)
     |> kv_add_text ~key:"title" ~value:t.title
-    |> kv_add_text ~delimiter:None ~key:"year" ~value:(string_of_int t.year)
+    |> kv_add_text ~delimiter:`None ~key:"year" ~value:(string_of_int t.year)
     |> kv_add_text ~key:"journal" ~value:t.journal
 
 end
@@ -178,7 +192,7 @@ module Inproceedings = struct
     Raw.Kv.empty
     |> kv_add_text ~key:"author" ~value:(names_to_bibtex t.author)
     |> kv_add_text ~key:"title" ~value:t.title
-    |> kv_add_text ~delimiter:None ~key:"year" ~value:(string_of_int t.year)
+    |> kv_add_text ~delimiter:`None ~key:"year" ~value:(string_of_int t.year)
     |> kv_add_text ~key:"booktitle" ~value:t.booktitle
 end
 
@@ -493,18 +507,26 @@ let consume_kv d =
     )
     | v when is_text v || is_digit v || is_underscore v ->
       token_add d v; nextc d; key_loop d
-    | _ -> err_malformed_key ~first_byte ~first_line d  
+    | _ -> err_malformed_key ~first_byte ~first_line d
   in
-  let value d = match d.c with
-    | 0x007B (* { *) -> nextc d; { text = consume_delimited_word ~delimiter:0x007D d; delimiter = Some `Curly }
-    | 0x0022 (* DQUOTE *) -> nextc d; { text = consume_delimited_word ~delimiter:0x0022 d; delimiter = Some `Dquote }
-    | _ -> { text = consume_word d; delimiter = None }
+  let value_part d = match d.c with
+    | 0x007B (* { *) -> nextc d; { Raw.text = consume_delimited_word ~delimiter:0x007D d; delimiter = `Curly }
+    | 0x0022 (* DQUOTE *) -> nextc d; { Raw.text = consume_delimited_word ~delimiter:0x0022 d; delimiter = `Dquote }
+    | _ -> { Raw.text = consume_word d; delimiter = `None }
+  in
+  let rec value_loop acc d =
+    read_ws d;
+    let acc = (value_part d) :: acc in
+    read_ws d;
+    match d.c with
+    | 0x0023 (* # *) -> nextc d; value_loop acc d 
+    | _ -> List.rev acc
   in
   read_ws d;
   let key = key_loop d in
   read_ws d;
-  let value = value d in
-  (key, value)
+  let value = value_loop [] d in
+  key, value
 
 let consume_all_kvs d =
   let first_byte = get_last_byte d and first_line = get_line_pos d in
@@ -627,16 +649,23 @@ let write_bytes e s = write_substring e s 0 (String.length s)
 let write_indent e ~nest =
   for _ = 1 to nest do write_char e ' '; write_char e ' ' done
 
-let write_text e = function
-  | { text; delimiter = None } -> write_bytes e text
-  | { text; delimiter = Some `Curly } ->
+let write_part e { Raw.text; delimiter } = match delimiter with
+  | `None -> write_bytes e text
+  | `Curly ->
       write_bytes e "{";
       write_bytes e text;
       write_bytes e "}"
-  | { text; delimiter = Some `Dquote } ->
+  | `Dquote ->
       write_bytes e "\"";
       write_bytes e text;
       write_bytes e "\""
+
+let write_text e = function
+  | [] -> ()
+  | [part] -> write_part e part
+  | part :: rest ->
+      write_part e part;
+      List.iter (fun p -> write_bytes e " # "; write_part e p) rest
 
 let write_kv e kv =
   let idx = ref 1 in

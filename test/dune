@@ -1,4 +1,4 @@
 (test
  (name test)
- (deps test.bib test2.bib)
+ (deps test.bib test2.bib concat.bib)
  (libraries bib))
