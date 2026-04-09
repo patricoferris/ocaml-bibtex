@@ -408,6 +408,7 @@ type decoder = {
   mutable c : int; (* Next character *)
   mutable d_count : int; (* Delimiter Counter *)
   mutable strings : text Kv.t; (* Strings for substitution *)
+  mutable expect_curly : bool; (* Using curly or regular parentheses *)
   token : Buffer.t;
 }
 
@@ -434,6 +435,7 @@ let make_decoder ?(filename = "-") reader =
     line = 1;
     line_start = 0;
     token;
+    expect_curly = false;
     d_count = 0;
   }
 
@@ -658,7 +660,11 @@ let consume_all_kvs d =
     | 0x002C (* COMMA *) ->
         nextc d;
         loop acc d
-    | 0x007D (* } *) ->
+    | 0x007D when d.expect_curly (* } *) ->
+        nextc d;
+        d.expect_curly <- false;
+        acc
+    | 0x0029 when not d.expect_curly (* ) *) ->
         nextc d;
         acc
     | _ -> err_malformed_kv ~first_byte ~first_line d
@@ -667,20 +673,31 @@ let consume_all_kvs d =
 
 let readc c d =
   let first_byte = get_last_byte d and first_line = get_line_pos d in
-  if d.c = c then nextc d
+  if Int.equal d.c c then nextc d
   else err_unexpected_character ~first_byte ~first_line c d
 
-let read_left_curly = readc 0x007B
 let read_comma = readc 0x002c
 let consume_preamble _ = Preamble "TODO"
 
+let read_entry_delimiter d =
+  match d.c with
+  | 0x007B (* { *) ->
+      d.expect_curly <- true;
+      nextc d
+  | 0x0028 (* ( *) ->
+      d.expect_curly <- false;
+      nextc d
+  | c ->
+      let first_byte = get_last_byte d and first_line = get_line_pos d in
+      err_unexpected_character ~first_byte ~first_line c d
+
 let consume_string d =
-  read_left_curly d;
+  read_entry_delimiter d;
   let kv = consume_all_kvs d in
   String kv
 
 let consume_comment d =
-  read_left_curly d;
+  read_entry_delimiter d;
   let cmt = consume_delimited_word ~delimiter:0x007D d in
   Comment cmt
 
@@ -697,7 +714,7 @@ let consume_citation_key d =
   token_pop d
 
 let consume_entry ~type' d =
-  read_left_curly d;
+  read_entry_delimiter d;
   read_ws d;
   let citation_key = consume_citation_key d in
   read_ws d;

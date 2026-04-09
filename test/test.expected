@@ -13,6 +13,11 @@
   month=jan,
   organization={London, UK}
 }
+@article{py03,
+  author={Xavier D\'ecoret},
+  title="PyBiTex",
+  year=2003
+}
 ============================= encoded test2.bib ==============================
 @string{
   hello=world
