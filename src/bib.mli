@@ -5,24 +5,22 @@
 open Bytesrw
 
 (** {2 Decoding}
-   
-    The standard decoder consumes bytes from a {! Bytes.Reader.t}
-    and constructs a {! Raw.t} representation of the Bibtex file.
-    This performs no validation of any of the entries or tags in
-    the Bibtex file, but is meant more as a means to get the data
-    into OCaml.
 
-    Use {! decode} to read your Bibtex data and {! encode} to write
-    it. For example, here is a little program to format a Bibtex file
-    from a string.
+    The standard decoder consumes bytes from a {! Bytes.Reader.t} and constructs
+    a {! Raw.t} representation of the Bibtex file. This performs no validation
+    of any of the entries or tags in the Bibtex file, but is meant more as a
+    means to get the data into OCaml.
+
+    Use {! decode} to read your Bibtex data and {! encode} to write it. For
+    example, here is a little program to format a Bibtex file from a string.
 
     {@ocaml[
-     open Bytesrw
+      open Bytesrw
 
-     let format s =
-       let reader = Bytes.Reader.of_string s in
-       let writer = Bytes.Writer.of_out_channel Out_channel.stdout in
-       Bib.encode (Bib.decode reader) writer
+      let format s =
+        let reader = Bytes.Reader.of_string s in
+        let writer = Bytes.Writer.of_out_channel Out_channel.stdout in
+        Bib.encode (Bib.decode reader) writer
     ]}
 
     You can then use it with something like:
@@ -33,10 +31,14 @@ open Bytesrw
         hello=world
       }
       - : unit = ()
-    ]}
+    ]} *)
 
-*)
+(** The [Raw] module is for the initial parsing of the Bibtex file. It will be
+    as close as possible to what is directly in the file. No abbreviations have
+    been expanded, no validation of fields or narrowing of types.
 
+    You should use this module if you are worried about the validity of your
+    bibtex files. *)
 module Raw : sig
   module Kv : sig
     type 'a t
@@ -57,11 +59,11 @@ module Raw : sig
 
   val part_to_string : ?delimiter:bool -> ?variable:bool -> part -> string
   (** [part_to_string ?delimiter p] returns the text content of a single part.
-      
-      If [delimiter] is [true], includes the delimiter in the output,
-      e.g. ["foo"] for [Dquote], [{bar}] for [Curly], or [baz] for bare words.
-      Defaults to [false]. If [variable] is [true], then the variable (if any) of
-      the part is replaced in the text. Defaults to [false]. *)
+
+      If [delimiter] is [true], includes the delimiter in the output, e.g.
+      ["foo"] for [Dquote], [{bar}] for [Curly], or [baz] for bare words.
+      Defaults to [false]. If [variable] is [true], then the variable (if any)
+      of the part is replaced in the text. Defaults to [false]. *)
 
   val delimiter : part -> [ `Curly | `Dquote | `None ]
   (** [delimiter p] returns the delimiter type for a single part. *)
@@ -70,11 +72,11 @@ module Raw : sig
   (** Raw strings from the Bibtex file *)
 
   val text : text -> string
-  (** [text v] returns the concatenated text of all value parts.
-      For single-part values, this is the original text.
-      For multi-part values, parts are joined without the separator, so
-      make sure to put the necessary whitespace in the surrounding values.
-      Example: ["OCaml" # "Rocks"] returns ["OCamlRocks"]. *)
+  (** [text v] returns the concatenated text of all value parts. For single-part
+      values, this is the original text. For multi-part values, parts are joined
+      without the separator, so make sure to put the necessary whitespace in the
+      surrounding values. Example: ["OCaml" # "Rocks"] returns ["OCamlRocks"].
+  *)
 
   val parts : text -> part list
   (** [parts v] returns the individual parts of a text value. *)
@@ -84,24 +86,22 @@ module Raw : sig
     | Preamble of string
     | Comment of string
     | Entry of { type' : string; citation_key : string; tags : text Kv.t }
-  
+
   type t = entry list
   (** A raw representation of a Bibtex file. *)
 
-  val fold_entries : ?type':string -> (citation_key:string -> text Kv.t -> 'acc -> 'acc) -> t -> 'acc -> 'acc
-  (** [fold ?type' fn t] folds over the entries of [t] using [fn]. You can supply
-      an optional [type'] to filter by (e.g. [~type':"article"]). *)
+  val fold_entries :
+    ?type':string ->
+    (citation_key:string -> text Kv.t -> 'acc -> 'acc) ->
+    t ->
+    'acc ->
+    'acc
+  (** [fold ?type' fn t] folds over the entries of [t] using [fn]. You can
+      supply an optional [type'] to filter by (e.g. [~type':"article"]). *)
 
   val pp : t Fmt.t
   (** A pretty printer *)
 end
-(** The [Raw] module is for the initial parsing of the Bibtex
-    file. It will be as close as possible to what is directly in the
-    file. No abbreviations have been expanded, no validation of fields
-    or narrowing of types. 
-
-    You should use this module if you are worried about the validity of your
-    bibtex files. *)
 
 val decode : ?filename:string -> Bytes.Reader.t -> Raw.t
 (*( [decode ?filename r] parses a Bibtex file into a list of {! Raw.entry}s *)
@@ -113,9 +113,8 @@ val encode : ?buf:Bytes.t -> Raw.t -> Bytes.Writer.t -> unit
 
 (** {2 Parsed Bibtex}
 
-    There are a series of standardised types of Bibtex entries. You can
-    convert {! Raw.t}s into them using {! of_raw}.
- *)
+    There are a series of standardised types of Bibtex entries. You can convert
+    {! Raw.t}s into them using {! of_raw}. *)
 
 (** Names, for people
     @inline *)
@@ -124,8 +123,8 @@ module Name : sig
   (** An author's name *)
 
   val v : ?suffix:string -> first:string -> last:string -> unit -> t
-  (** A constructor for names, see the example in {! of_string}
-      for more information *)
+  (** A constructor for names, see the example in {! of_string} for more
+      information *)
 
   val display : t -> string
   (** [display t] puts the parts of name in order *)
@@ -134,8 +133,9 @@ module Name : sig
   (** [to_bibtex t] puts the author name back into the bibtex format *)
 
   val first : t -> string
-  (** The first name of the author. Note that this may include middle names and initials.
-      For example: ["Smith, Alice M."] will have the [first] of ["Alice M."]. *)
+  (** The first name of the author. Note that this may include middle names and
+      initials. For example: ["Smith, Alice M."] will have the [first] of
+      ["Alice M."]. *)
 
   val last : t -> string
   (** [last name] will be the last name of the author *)
@@ -146,28 +146,26 @@ module Name : sig
   val of_string : string -> t
   (** Parses a Bibtex name, may raise [Invalid_argument _].
 
-   For example:
+      For example:
 
-   {@ocaml[
-     # Bib.Name.of_string "Ada Lovelace" |> Bib.Name.display;;
-     - : string = "Ada Lovelace"
-     # Bib.Name.of_string "King, Jr., Martin Luther" |> Bib.Name.display;;
-     - : string = "Martin Luther King Jr."
-     # Bib.Name.of_string "Turing, Alan M." |> Bib.Name.first;;
-     - : string = "Alan M."
-   ]}
-   *)
+      {@ocaml[
+        # Bib.Name.of_string "Ada Lovelace" |> Bib.Name.display;;
+        - : string = "Ada Lovelace"
+        # Bib.Name.of_string "King, Jr., Martin Luther" |> Bib.Name.display;;
+        - : string = "Martin Luther King Jr."
+        # Bib.Name.of_string "Turing, Alan M." |> Bib.Name.first;;
+        - : string = "Alan M."
+      ]} *)
 end
 
 val names : string -> Name.t list
 (** [names s] parses an [author] field into a list of names.
 
-  {@ocaml[
-     # Bib.names "Ada Lovelace and  Turing, Alan M."
-       |> List.map Bib.Name.display
-     - : string list = ["Ada Lovelace"; "Alan M. Turing"]
-  ]}
- *)
+    {@ocaml[
+      # Bib.names "Ada Lovelace and  Turing, Alan M."
+        |> List.map Bib.Name.display
+      - : string list = ["Ada Lovelace"; "Alan M. Turing"]
+    ]} *)
 
 (** Articles are texts from journals or magazines. *)
 module Article : sig
@@ -207,12 +205,7 @@ end
 module Inproceedings : sig
   type t
 
-  val v :
-    author:Name.t list ->
-    booktitle:string ->
-    year:int ->
-    string ->
-    t
+  val v : author:Name.t list -> booktitle:string -> year:int -> string -> t
   (** Make a new Inproceedings entry *)
 
   val author : t -> Name.t list
@@ -221,19 +214,20 @@ module Inproceedings : sig
   val booktitle : t -> string
 end
 
-type 'a with_extra_tags = ('a * Raw.text Raw.Kv.t)
-(** ['a with_extra_tags] will decode as many of the fields as possible
-    and stash the rest in the second value of the pair *)
+type 'a with_extra_tags = 'a * Raw.text Raw.Kv.t
+(** ['a with_extra_tags] will decode as many of the fields as possible and stash
+    the rest in the second value of the pair *)
 
 type entry =
   | Article of Article.t with_extra_tags
   | Inproceedings of Inproceedings.t with_extra_tags
   | Other of string with_extra_tags
-(** A bibtex entry. In [Other (s, tags)], [s] is the name of the entry type *)
+      (** A bibtex entry. In [Other (s, tags)], [s] is the name of the entry
+          type *)
 
 type t = (string * entry) list
-(** A {! Bib.t} is a list of database entries that associate citation
-    keys with a full {! entry}. *)
+(** A {! Bib.t} is a list of database entries that associate citation keys with
+    a full {! entry}. *)
 
 val article : ?extra:Raw.text Raw.Kv.t -> Article.t -> entry
 (** Create a new article entry *)
@@ -244,11 +238,12 @@ val inproceedings : ?extra:Raw.text Raw.Kv.t -> Inproceedings.t -> entry
 (** {3 Utilities} *)
 
 val of_string : ?filename:string -> string -> t
-(** [of_string t] parses a bibtex file from [s] *) 
+(** [of_string t] parses a bibtex file from [s] *)
 
 val to_string : ?buf:Buffer.t -> t -> string
-(** A counterpart to {! of_string}. See the {!page-index.quick_start} guide for more information.
-    A user may supply their own empty buffer to use to write the data to. *)
+(** A counterpart to {! of_string}. See the {!page-index.quick_start} guide for
+    more information. A user may supply their own empty buffer to use to write
+    the data to. *)
 
 val of_raw : Raw.t -> t
 (** [of_raw raw] converts a set of raw entries (most likely from {! decode}).
@@ -256,42 +251,41 @@ val of_raw : Raw.t -> t
     For example:
 
     {@ocaml[
-     # let bib_of_string s =
-       let reader = Bytes.Reader.of_string s in
-       Bib.of_raw (Bib.decode reader);;
-     val bib_of_string : string -> Bib.t = <fun>
-     # bib_of_string "@article{smith2020paper, author={Alice Smith}, title={Paper}, year=2020, journal={Some Journal}}";;
-     - : Bib.t = [("smith2020paper", Bib.Article (<abstr>, <abstr>))]
+      # let bib_of_string s =
+        let reader = Bytes.Reader.of_string s in
+        Bib.of_raw (Bib.decode reader);;
+      val bib_of_string : string -> Bib.t = <fun>
+      # bib_of_string "@article{smith2020paper, author={Alice Smith}, title={Paper}, year=2020, journal={Some Journal}}";;
+      - : Bib.t = [("smith2020paper", Bib.Article (<abstr>, <abstr>))]
     ]}
 
-    Note that for any unimplemented converts from raw to parsed, they will become [Other]s.
-    The common functions below will still work as expected.
+    Note that for any unimplemented converts from raw to parsed, they will
+    become [Other]s. The common functions below will still work as expected.
 
     {@ocaml[
       # let v = bib_of_string "@misc{ocaml-bib, author={Bib Maintainers}}";;
       val v : Bib.t = [("ocaml-bib", Bib.Other ("misc", <abstr>))]
       # List.map (fun (_, e) -> Bib.author e |> List.map Bib.Name.display) v;;
       - : string list list = [["Bib Maintainers"]]
-    ]}
-*)
+    ]} *)
 
 val to_raw : t -> Raw.t
-(** [to_raw t] allows a user to convert well-formed bibtex entries into the raw format
-    suitable for encoding. This can be used to programmatically construct Bibtex entries
-    in OCaml and serialise them.
+(** [to_raw t] allows a user to convert well-formed bibtex entries into the raw
+    format suitable for encoding. This can be used to programmatically construct
+    Bibtex entries in OCaml and serialise them.
 
     {@ocaml[
       # let v = [
-        "some-paper", 
+        "some-paper",
         Bib.article (
-          Bib.Article.v 
-            ~author:[ Bib.Name.v ~first:"Ada" ~last:"Lovelace" () ] 
+          Bib.Article.v
+            ~author:[ Bib.Name.v ~first:"Ada" ~last:"Lovelace" () ]
             ~journal:"Journal"
             ~year:1234 "Title"
         )];;
       val v : (string * Bib.entry) list =
         [("some-paper", Bib.Article (<abstr>, <abstr>))]
-      # Bib.encode (Bib.to_raw v) (Bytes.Writer.of_out_channel Out_channel.stdout);; 
+      # Bib.encode (Bib.to_raw v) (Bytes.Writer.of_out_channel Out_channel.stdout);;
       @article{some-paper,
         author={Lovelace, Ada},
         title={Title},
@@ -299,14 +293,13 @@ val to_raw : t -> Raw.t
         journal={Journal}
       }
       - : unit = ()
-    ]}
-*)
+    ]} *)
 
 (** {3 Common fields}
 
-   Quite a few parsed Bibtex entries share the same fields. To make it easier
-   to extract fields you wish to manipulate, we provide some projections from
-   {! entry}s. *)
+    Quite a few parsed Bibtex entries share the same fields. To make it easier
+    to extract fields you wish to manipulate, we provide some projections from
+    {! entry}s. *)
 
 val type' : entry -> string
 (** Convert the entry into its type, for example ["inproceedings"]. *)
@@ -332,18 +325,17 @@ module Textloc : sig
 end
 
 module Error : sig
-  type t = Textloc.t * string 
+  type t = Textloc.t * string
 end
 
 exception Error of Error.t
 (** Parsing errors for {! Bib} which combine a text-location ({!Textloc.t})
-    alongside a useful error message. During a {! decode} exceptions might
-    be raised.
+    alongside a useful error message. During a {! decode} exceptions might be
+    raised.
 
     For example:
-    
+
     {@ocaml[
       # format {|@string{ key="unclosed }|};;
       Exception: File "-", line 1, characters 14-25: Unclosed string
     ]} *)
-

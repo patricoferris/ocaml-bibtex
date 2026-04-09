@@ -24,7 +24,9 @@
    bytesrw
    astring
    fmt
-   (mdx :with-test))
+   (mdx :with-test)
+   (ocamlformat (and (= "0.28.1") :with-dev-setup))
+ )
  (tags
   ("bibtex")))
 
