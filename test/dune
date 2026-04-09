@@ -2,3 +2,9 @@
  (name test)
  (deps test.bib test2.bib concat.bib)
  (libraries bib))
+
+(executable
+ (name bibtrip)
+ (package bib)
+ (public_name bibtrip)
+ (libraries bib))
