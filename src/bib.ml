@@ -68,22 +68,23 @@ module Raw = struct
 
   type entry =
     | String of text Kv.t
-    | Preamble of string
+    | Preamble of text
     | Comment of string
     | Entry of { type' : string; citation_key : string; tags : text Kv.t }
 
+  let rec pp_part fmt { text; delimiter; variable } =
+    match (variable, delimiter) with
+    | None, `None -> Fmt.string fmt text
+    | Some part, `None -> pp_txt fmt part
+    | _, `Curly -> Fmt.pf fmt "{%s}" text
+    | _, `Dquote -> Fmt.quote Fmt.string fmt text
+
+  and pp_txt fmt = function
+    | [] -> ()
+    | [ part ] -> pp_part fmt part
+    | parts -> Fmt.pf fmt "%a" Fmt.(list ~sep:(Fmt.any " # ") pp_part) parts
+
   let pp_kv fmt k =
-    let rec pp_part fmt { text; delimiter; variable } =
-      match (variable, delimiter) with
-      | None, `None -> Fmt.string fmt text
-      | Some part, `None -> pp_txt fmt part
-      | _, `Curly -> Fmt.pf fmt "{%s}" text
-      | _, `Dquote -> Fmt.quote Fmt.string fmt text
-    and pp_txt fmt = function
-      | [] -> ()
-      | [ part ] -> pp_part fmt part
-      | parts -> Fmt.pf fmt "%a" Fmt.(list ~sep:(Fmt.any " # ") pp_part) parts
-    in
     Fmt.pf fmt "%a"
       Fmt.(
         list ~sep:(Fmt.any ",@\n") (fun ppf (k, v) ->
@@ -92,7 +93,7 @@ module Raw = struct
 
   let pp_entry fmt = function
     | String kv -> Fmt.pf fmt "@[<v 2>@string{@;%a@.}@]" pp_kv kv
-    | Preamble kv -> Fmt.pf fmt "@preamble{%s}" kv
+    | Preamble s -> Fmt.pf fmt "@[<v 2>@premable{@;%a@.}@]" pp_txt s
     | Comment kv -> Fmt.pf fmt "@comment{%a}" Fmt.string kv
     | Entry { type'; citation_key; tags } ->
         Fmt.pf fmt "@%s{%s,@[<hov 2>  %a@.}@]" type' citation_key pp_kv tags
@@ -590,28 +591,7 @@ let consume_word d =
   loop d;
   token_pop d
 
-let consume_kv d =
-  let first_byte = get_last_byte d and first_line = get_line_pos d in
-  let rec key_loop d =
-    match d.c with
-    | 0x003D (* = *) ->
-        let v = token_pop d in
-        nextc d;
-        v
-    | v when is_ws v -> (
-        let v = token_pop d in
-        read_ws d;
-        match d.c with
-        | 0x003D ->
-            nextc d;
-            v
-        | _ -> err_malformed_key ~first_byte ~first_line d)
-    | v when is_text v || is_digit v || is_underscore v ->
-        token_add d v;
-        nextc d;
-        key_loop d
-    | _ -> err_malformed_key ~first_byte ~first_line d
-  in
+let read_parts d =
   let value_part d =
     match d.c with
     | 0x007B (* { *) ->
@@ -643,10 +623,34 @@ let consume_kv d =
         value_loop acc d
     | _ -> List.rev acc
   in
+  value_loop [] d
+
+let consume_kv d =
+  let first_byte = get_last_byte d and first_line = get_line_pos d in
+  let rec key_loop d =
+    match d.c with
+    | 0x003D (* = *) ->
+        let v = token_pop d in
+        nextc d;
+        v
+    | v when is_ws v -> (
+        let v = token_pop d in
+        read_ws d;
+        match d.c with
+        | 0x003D ->
+            nextc d;
+            v
+        | _ -> err_malformed_key ~first_byte ~first_line d)
+    | v when is_text v || is_digit v || is_underscore v ->
+        token_add d v;
+        nextc d;
+        key_loop d
+    | _ -> err_malformed_key ~first_byte ~first_line d
+  in
   read_ws d;
   let key = key_loop d in
   read_ws d;
-  let value = value_loop [] d in
+  let value = read_parts d in
   (key, value)
 
 let consume_all_kvs d =
@@ -677,7 +681,6 @@ let readc c d =
   else err_unexpected_character ~first_byte ~first_line c d
 
 let read_comma = readc 0x002c
-let consume_preamble _ = Preamble "TODO"
 
 let read_entry_delimiter d =
   match d.c with
@@ -691,10 +694,30 @@ let read_entry_delimiter d =
       let first_byte = get_last_byte d and first_line = get_line_pos d in
       err_unexpected_character ~first_byte ~first_line c d
 
+let read_exit_delimiter d =
+  match d.c with
+  | 0x007D (* { *) ->
+      d.expect_curly <- true;
+      nextc d
+  | 0x0029 (* ) *) ->
+      d.expect_curly <- false;
+      nextc d
+  | c ->
+      let first_byte = get_last_byte d and first_line = get_line_pos d in
+      err_unexpected_character ~first_byte ~first_line c d
+
 let consume_string d =
   read_entry_delimiter d;
   let kv = consume_all_kvs d in
   String kv
+
+let consume_preamble d =
+  read_entry_delimiter d;
+  read_ws d;
+  let parts = read_parts d in
+  read_exit_delimiter d;
+  read_ws d;
+  Preamble parts
 
 let consume_comment d =
   read_entry_delimiter d;
@@ -731,7 +754,7 @@ let consume_entry d =
   | 0x0040 (* @ *) -> (
       nextc d;
       match consume_word d |> Stdlib.String.lowercase_ascii with
-      | "premable" -> consume_preamble d
+      | "preamble" -> consume_preamble d
       | "string" -> consume_string d
       | "comment" -> consume_comment d
       | type' -> consume_entry ~type' d)
@@ -860,7 +883,7 @@ let write_entry e = function
       write_bytes e "}\n"
   | Preamble p ->
       write_bytes e "@preamble{";
-      write_bytes e p;
+      write_text e p;
       write_bytes e "}\n"
   | Entry { type'; citation_key; tags } ->
       write_bytes e "@";

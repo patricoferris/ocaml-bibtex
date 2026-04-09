@@ -3,6 +3,10 @@
   hello=world,
   this=is
 }
+@string{
+  maintainer="Patrick"
+}
+@preamble{"This pacjage is mainted by: " # maintainer}
 @comment{A little comment to discuss foo bar baz}
 @inproceedings{pike1990plan,
   title={Plan 9 from {Bell Labs}},

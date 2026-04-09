@@ -83,7 +83,7 @@ module Raw : sig
 
   type entry =
     | String of text Kv.t
-    | Preamble of string
+    | Preamble of text
     | Comment of string
     | Entry of { type' : string; citation_key : string; tags : text Kv.t }
 
@@ -96,8 +96,8 @@ module Raw : sig
     t ->
     'acc ->
     'acc
-  (** [fold ?type' fn t] folds over the entries of [t] using [fn]. You can
-      supply an optional [type'] to filter by (e.g. [~type':"article"]). *)
+  (** [fold_entries ?type' fn t] folds over the entries of [t] using [fn]. You
+      can supply an optional [type'] to filter by (e.g. [~type':"article"]). *)
 
   val pp : t Fmt.t
   (** A pretty printer *)

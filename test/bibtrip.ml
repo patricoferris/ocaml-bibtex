@@ -6,7 +6,26 @@ open Bytesrw
 
 let exec = Filename.basename Sys.executable_name
 
-let trip filename =
+let dump_bib bib =
+  List.iter
+    (function
+      | Bib.Raw.Comment s -> Fmt.pr "Comment:\n  %s\n" s
+      | Bib.Raw.String kv ->
+          Fmt.pr "String:\n";
+          Bib.Raw.Kv.to_list kv
+          |> List.iter (fun (k, v) ->
+              let parts = Bib.Raw.text v in
+              Format.printf "  %s = %s\n%!" k parts)
+      | Bib.Raw.Entry { type'; citation_key; tags } ->
+          Fmt.pr "Entry(%s,%s):\n" type' citation_key;
+          Bib.Raw.Kv.to_list tags
+          |> List.iter (fun (k, v) ->
+              let parts = Bib.Raw.text v in
+              Format.printf "  %s = %s\n%!" k parts)
+      | Bib.Raw.Preamble txt -> Fmt.pr "Preamble:\n  %s\n" (Bib.Raw.text txt))
+    bib
+
+let trip filename dump =
   let with_input fn =
     match filename with
     | "-" -> Bytes.Reader.of_in_channel In_channel.stdin |> fn
@@ -16,8 +35,10 @@ let trip filename =
   in
   with_input @@ fun reader ->
   let bib = Bib.decode ~filename reader in
-  let writer = Bytes.Writer.of_out_channel Out_channel.stdout in
-  Bib.encode bib writer
+  if dump then dump_bib bib
+  else
+    let writer = Bytes.Writer.of_out_channel Out_channel.stdout in
+    Bib.encode bib writer
 
 let main () =
   let usage =
@@ -29,13 +50,19 @@ let main () =
   in
   let cmd = ref `Trip in
   let inf = ref "-" in
+  let dump = ref false in
   let set_inf f =
     if !inf <> "-" then raise (Arg.Bad "only one file can be specified")
     else inf := f
   in
-  let options = [] in
+  let options =
+    [
+      ("-dump", Arg.Set dump, "dump bibtex file.");
+      ("--dump", Arg.Set dump, "dump bibtex file.");
+    ]
+  in
   Arg.parse (Arg.align options) set_inf usage;
-  match !cmd with `Trip -> trip !inf
+  match !cmd with `Trip -> trip !inf !dump
 
 let () = main ()
 
