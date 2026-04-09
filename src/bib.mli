@@ -40,22 +40,28 @@ open Bytesrw
 module Raw : sig
   module Kv : sig
     type 'a t
+    (** A key-value store. *)
 
     val to_list : 'a t -> (string * 'a) list
     (** [to_list kv] converts [kv] to an association list. *)
 
     val find : string -> 'a t -> 'a option
     (** [find key kv] looks for [key] in [kv]. *)
+
+    val merge : 'a t -> update:'a t -> 'a t
+    (** [merge old ~update] merges the key-values [update] into [old]. *)
   end
 
   type part
   (** A single component of a value with its delimiter info. *)
 
-  val part : ?delimiter:bool -> part -> string
-  (** [part ?delimiter p] returns the text content of a single part.
+  val part_to_string : ?delimiter:bool -> ?variable:bool -> part -> string
+  (** [part_to_string ?delimiter p] returns the text content of a single part.
+      
       If [delimiter] is [true], includes the delimiter in the output,
       e.g. ["foo"] for [Dquote], [{bar}] for [Curly], or [baz] for bare words.
-      Defaults to [false]. *)
+      Defaults to [false]. If [variable] is [true], then the variable (if any) of
+      the part is replaced in the text. Defaults to [false]. *)
 
   val delimiter : part -> [ `Curly | `Dquote | `None ]
   (** [delimiter p] returns the delimiter type for a single part. *)
@@ -80,7 +86,7 @@ module Raw : sig
     | Entry of { type' : string; citation_key : string; tags : text Kv.t }
   
   type t = entry list
-  (** A representation of a Bibtex file *)
+  (** A raw representation of a Bibtex file. *)
 
   val fold_entries : ?type':string -> (citation_key:string -> text Kv.t -> 'acc -> 'acc) -> t -> 'acc -> 'acc
   (** [fold ?type' fn t] folds over the entries of [t] using [fn]. You can supply
@@ -92,7 +98,10 @@ end
 (** The [Raw] module is for the initial parsing of the Bibtex
     file. It will be as close as possible to what is directly in the
     file. No abbreviations have been expanded, no validation of fields
-    or narrowing of types. *)
+    or narrowing of types. 
+
+    You should use this module if you are worried about the validity of your
+    bibtex files. *)
 
 val decode : ?filename:string -> Bytes.Reader.t -> Raw.t
 (*( [decode ?filename r] parses a Bibtex file into a list of {! Raw.entry}s *)

@@ -12,7 +12,7 @@ easiest way to do this is with {! Bib.of_string}.
   val v : Bib.t = [("key", Bib.Other ("misc", <abstr>))]
 ]}
 
-With a {! Bib.t} in your hand you can then map over it and produce new values.
+With a {! Bib.t} in your hand, you can then map over it and produce new values.
 
 {@ocaml[
   # let titles = List.filter_map (fun (_, o) -> Bib.title o) v;;
@@ -36,5 +36,40 @@ constructors directly or the functions provided in {! Bib}.
     year=2024,
     journal={Journal}
   }
+  - : unit = ()
+]}
+
+{2:delims Delimiters and Substitutions}
+
+Bibtex text can be delimited by double quotes (["hello"]) or curly braces
+([{hello}]). Text need not be delimited ([ieee]). When text is not delimited,
+it may be actually refer to a variable defined inside a [String] entry.
+Functions like {! Bib.Raw.text} and {! Bib.Raw.part_to_string} allow you to
+substitute variables and delimiters into the text.
+
+{@ocaml[
+let v = Bib.of_string {|
+  @string{ hello = "world" }
+  @misc{misc_key, title=hello, other={delimed}}
+|}
+
+let print_entry bib = 
+  Bib.Raw.fold_entries (fun ~citation_key kv () ->
+    Format.printf "Entry: %s\n%!" citation_key;
+    List.iter (fun (k, v) ->
+	  let parts = Bib.Raw.text v in
+	  Format.printf "  %s = %s\n%!" k parts 
+    ) (Bib.Raw.Kv.to_list kv)
+  ) bib ()
+]}
+
+The [print_entry] function uses {! Bib.Raw.text} which automatically replaces
+variables like [hello] with their associated value.
+
+{@ocaml[
+  # print_entry (Bib.to_raw v);;
+  Entry: misc_key
+    title = world
+    other = delimed
   - : unit = ()
 ]}
