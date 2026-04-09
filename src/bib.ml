@@ -27,21 +27,39 @@ module Raw = struct
       loop [] assoc
 
     let to_list t = List.rev t
+
+    let merge kv1 ~update =
+      let rec loop = function
+        | [] -> []
+        | (k, v) :: xs ->
+          if Option.is_some (List.assoc_opt k update) then
+            loop xs
+          else
+            (k, v) :: loop xs
+      in
+      update @ loop kv1
   end
 
-  type part = { text : string; delimiter : [ `Curly | `Dquote | `None ] }
+  type part = { text : string; delimiter : [ `Curly | `Dquote | `None ]; variable : text option }
 
-  type text = part list
+  and text = part list
 
-  let text t = String.concat ~sep:"" (List.map (fun p -> p.text) t)
+  let rec text t = String.concat ~sep:"" (List.map (function
+    | { text; variable = None; _ } -> text
+    | { variable = Some var; _ } -> text var
+  ) t)
 
   let parts t = t
   let delimiter p = p.delimiter
-  let part ?(delimiter=false) p =
-    match delimiter, p.delimiter with
-    | false, _ | true, `None -> p.text
-    | true, `Curly -> Printf.sprintf "{%s}" p.text
-    | true, `Dquote -> Printf.sprintf "\"%s\"" p.text (* TODO: is any quoting of raw text needed? *)
+
+  let part_to_string ?(delimiter=false) ?(variable=false) p =
+    match p.variable with
+    | Some v when variable -> text v 
+    | Some _ | None -> 
+      match delimiter, p.delimiter with
+      | false, _ | true, `None -> p.text
+      | true, `Curly -> Printf.sprintf "{%s}" p.text
+      | true, `Dquote -> Printf.sprintf "\"%s\"" p.text (* TODO: is any quoting of raw text needed? *)
 
   type entry =
     | String of text Kv.t
@@ -50,12 +68,13 @@ module Raw = struct
     | Entry of { type' : string; citation_key : string; tags : text Kv.t }
 
   let pp_kv fmt k =
-    let pp_part fmt { text; delimiter } = match delimiter with
-      | `None -> Fmt.string fmt text
-      | `Curly -> Fmt.pf fmt "{%s}" text
-      | `Dquote -> Fmt.quote Fmt.string fmt text
-    in
-    let pp_txt fmt = function
+    let rec pp_part fmt { text; delimiter; variable } =
+      match variable, delimiter with
+      | None, `None -> Fmt.string fmt text
+      | Some part, `None -> pp_txt fmt part
+      | _, `Curly -> Fmt.pf fmt "{%s}" text
+      | _, `Dquote -> Fmt.quote Fmt.string fmt text
+    and pp_txt fmt = function
       | [] -> ()
       | [part] -> pp_part fmt part
       | parts -> Fmt.pf fmt "%a" Fmt.(list ~sep:(Fmt.any " # ") pp_part) parts
@@ -135,8 +154,8 @@ let names_to_bibtex =
   loop ""
 
 
-let kv_add_text ?(delimiter=`Curly) ~key ~value =
-  Raw.Kv.add key [{ Raw.text = value; delimiter }]
+let kv_add_text ?(delimiter=`Curly) ?variable ~key ~value =
+  Raw.Kv.add key [{ Raw.text = value; delimiter; variable }]
 
 module Article = struct
   type t = {
@@ -365,6 +384,7 @@ type decoder = {
     mutable line_start : int; (* Current line global byte position. *)
     mutable c : int; (* Next character *)
     mutable d_count : int; (* Delimiter Counter *)
+    mutable strings : text Kv.t; (* Strings for substitution *)
     token : Buffer.t;
 }
 
@@ -378,6 +398,7 @@ let make_decoder ?(filename = "-") reader =
   let token = Buffer.create 255 in
   let i = Stdlib.Bytes.create 1 in
   { filename; reader;
+    strings = Kv.empty;
     c = 0;
     i_max = 0; i_next = 1 (* triggers an initial refill *); i;
     byte_count = 0; line = 1; line_start = 0; token; d_count = 0 }
@@ -510,9 +531,12 @@ let consume_kv d =
     | _ -> err_malformed_key ~first_byte ~first_line d
   in
   let value_part d = match d.c with
-    | 0x007B (* { *) -> nextc d; { Raw.text = consume_delimited_word ~delimiter:0x007D d; delimiter = `Curly }
-    | 0x0022 (* DQUOTE *) -> nextc d; { Raw.text = consume_delimited_word ~delimiter:0x0022 d; delimiter = `Dquote }
-    | _ -> { Raw.text = consume_word d; delimiter = `None }
+    | 0x007B (* { *) -> nextc d; { Raw.text = consume_delimited_word ~delimiter:0x007D d; delimiter = `Curly; variable = None }
+    | 0x0022 (* DQUOTE *) -> nextc d; { Raw.text = consume_delimited_word ~delimiter:0x0022 d; delimiter = `Dquote; variable = None }
+    | _ ->
+      let text = consume_word d in
+      let variable = Kv.find text d.strings in
+      { Raw.text; delimiter = `None; variable }
   in
   let rec value_loop acc d =
     read_ws d;
@@ -595,11 +619,18 @@ let consume_entry d =
   )
   | _ -> err_unexpected_character ~first_byte ~first_line 0x0040 d 
 
+let update_strings d = function
+  | Raw.String update ->
+    d.strings <- Kv.merge d.strings ~update;
+    d
+  | _ -> d
+
 let decode ?filename r =
   let d = make_decoder ?filename r in
   nextc d;
   let rec loop acc d =
     let entry = consume_entry d in
+    let d = update_strings d entry in
     read_ws d;
     match d.c with
     | v when v = eot -> List.rev (entry :: acc)  
@@ -649,7 +680,7 @@ let write_bytes e s = write_substring e s 0 (String.length s)
 let write_indent e ~nest =
   for _ = 1 to nest do write_char e ' '; write_char e ' ' done
 
-let write_part e { Raw.text; delimiter } = match delimiter with
+let write_part e { Raw.text; delimiter; variable = _ } = match delimiter with
   | `None -> write_bytes e text
   | `Curly ->
       write_bytes e "{";

@@ -1,4 +1,4 @@
-===== Encoded test.bib =====
+============================== encoded test.bib ==============================
 @string{
   hello=world,
   this=is
@@ -13,19 +13,23 @@
   month=jan,
   organization={London, UK}
 }
-===== Encoded test2.bib =====
+============================= encoded test2.bib ==============================
 @string{
   hello=world
 }
-===== inproceedings_authors test.bib =====
+======================= inproceedings_authors test.bib =======================
 Pike, Rob and Presotto, Dave and Thompson, Ken and Trickey, Howard and others
-===== Concat concat.bib =====
+============================= concat concat.bib ==============================
 Entry: test
-  title = "OCaml" # " " # "Rocks"
-  note = {NI} # {Trees}
-  mixed = "Cambridge" # ">" # {Oxford}
+  title = OCaml Rocks
+  note = NITrees
+  mixed = Cambridge>Oxford
   year = 2026
-===== Concat roundtrip concat.bib =====
+  journal = IEEE
+======================== concat roundtrip concat.bib =========================
+@string{
+  ieee="SHOULDNEVERSEETHIS"
+}
 @string{
   ieee="IEEE"
 }
@@ -33,5 +37,6 @@ Entry: test
   title="OCaml" # " " # "Rocks",
   note={NI} # {Trees},
   mixed="Cambridge" # ">" # {Oxford},
-  year=2026
+  year=2026,
+  journal=ieee
 }
