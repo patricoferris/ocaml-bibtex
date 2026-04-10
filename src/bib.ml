@@ -1,5 +1,6 @@
 (*---------------------------------------------------------------------------
-   Large parts of this codec are taken from the jsont codec.
+   Large parts of this codec are taken from the jsont codec. In particular
+   the unicode handling logic.
 
    Copyright (c) 2024 The jsont programmers. All rights reserved.
    SPDX-License-Identifier: ISC
@@ -397,6 +398,16 @@ end
 
 open Raw
 
+let uchar_max_utf_8_byte_length = 4
+
+let[@inline] uchar_utf_8_byte_decode_length = function
+  | '\x00' .. '\x7F' -> 1
+  | '\x80' .. '\xC1' -> 0
+  | '\xC2' .. '\xDF' -> 2
+  | '\xE0' .. '\xEF' -> 3
+  | '\xF0' .. '\xF4' -> 4
+  | _ -> 0
+
 type decoder = {
   filename : string;
   reader : Bytes.Reader.t; (* The source of bytes. *)
@@ -404,6 +415,7 @@ type decoder = {
   mutable i_max : int; (* Maximum byte index in [i]. *)
   mutable i_next : int; (* Next byte index to read in [i]. *)
   mutable byte_count : int; (* Global byte count. *)
+  overlap : Stdlib.Bytes.t;
   mutable line : int; (* Current line number. *)
   mutable line_start : int; (* Current line global byte position. *)
   mutable c : int; (* Next character *)
@@ -422,12 +434,14 @@ let[@inline] is_text u =
 let[@inline] is_underscore u = Int.equal u 95
 
 let make_decoder ?(filename = "-") reader =
+  let overlap = Stdlib.Bytes.create uchar_max_utf_8_byte_length in
   let token = Buffer.create 255 in
   let i = Stdlib.Bytes.create 1 in
   {
     filename;
     reader;
     strings = Kv.empty;
+    overlap;
     c = 0;
     i_max = 0;
     i_next = 1 (* triggers an initial refill *);
@@ -449,7 +463,9 @@ let[@inline] get_line_pos d = (d.line, d.line_start)
 let get_last_byte d =
   if d.c <= 0x7F then d.byte_count - 1
   else if d.c = sot || d.c = eot then d.byte_count
-  else failwith "Impossible last byte"
+  else
+    (* On multi-bytes uchars we want to point on the first byte. *)
+    d.byte_count - Uchar.utf_8_byte_length (Uchar.of_int d.c)
 
 (* Errors *)
 
@@ -480,14 +496,51 @@ let err_unexpected_character ~first_byte ~first_line e d =
     (Stdlib.Char.unsafe_chr e)
     (Stdlib.Char.unsafe_chr d.c)
 
+let err_malformed_utf_8 ~first_byte ~first_line d =
+  if d.i_next > d.i_max then
+    err_to_here ~first_byte ~first_line d
+      "UTF-8 decoding error: unexpected end of bytes"
+  else
+    err_to_here ~first_byte ~first_line d
+      "UTF-8 decoding error: invalid byte %a" Fmt.string
+      (Printf.sprintf "%x02x" (Bytes.get_uint8 d.i d.i_next))
+
 (* Decode next character in d.u *)
 let[@inline] is_eod d = d.i_max = -1 (* Only happens on Slice.eod *)
+let[@inline] is_eoslice d = d.i_next > d.i_max
 let[@inline] available d = d.i_max - d.i_next + 1
 
 let[@inline] set_slice d slice =
   d.i <- Bytes.Slice.bytes slice;
   d.i_next <- Bytes.Slice.first slice;
   d.i_max <- d.i_next + Bytes.Slice.length slice - 1
+
+let rec setup_overlap d start need =
+  match need with
+  | 0 ->
+      let slice =
+        match available d with
+        | 0 -> Bytes.Reader.read d.reader
+        | length -> Bytes.Slice.make d.i ~first:d.i_next ~length
+      in
+      d.i <- d.overlap;
+      d.i_next <- 0;
+      d.i_max <- start;
+      slice
+  | need ->
+      let first_byte = get_last_byte d and first_line = get_line_pos d in
+      if is_eoslice d then set_slice d (Bytes.Reader.read d.reader);
+      if is_eod d then (
+        d.byte_count <- d.byte_count - start;
+        err_malformed_utf_8 ~first_byte ~first_line d);
+      let available = available d in
+      let take = Int.min need available in
+      for i = 0 to take - 1 do
+        Bytes.set d.overlap (start + i) (Bytes.get d.i (d.i_next + i))
+      done;
+      d.i_next <- d.i_next + take;
+      d.byte_count <- d.byte_count + take;
+      setup_overlap d (start + take) (need - take)
 
 let rec nextc d =
   let first_byte = get_last_byte d and first_line = get_line_pos d in
@@ -499,29 +552,76 @@ let rec nextc d =
       nextc d)
   else
     let b = Bytes.get d.i d.i_next in
-    d.c <-
-      (match b with
-      | ('\x00' .. '\x09' | '\x0B' | '\x0E' .. '\x7F') as u ->
-          (* ASCII fast path *)
-          d.i_next <- d.i_next + 1;
-          d.byte_count <- d.byte_count + 1;
-          Stdlib.Char.code u
-      | '\x0D' (* CR *) ->
-          d.i_next <- d.i_next + 1;
-          d.byte_count <- d.byte_count + 1;
-          d.line_start <- d.byte_count;
-          d.line <- d.line + 1;
-          0x000D
-      | '\x0A' (* LF *) ->
-          d.i_next <- d.i_next + 1;
-          d.byte_count <- d.byte_count + 1;
-          d.line_start <- d.byte_count;
-          if d.c <> 0x000D then d.line <- d.line + 1;
-          0x000A
-      | c ->
-          err_to_here ~first_line ~first_byte d
-            "Unsupported encoding, please use ASCII with LaTeX. Got %i."
-            (Stdlib.Char.code c))
+    if a < uchar_max_utf_8_byte_length && a < uchar_utf_8_byte_decode_length b
+    then begin
+      let s = setup_overlap d 0 (uchar_utf_8_byte_decode_length b) in
+      nextc d;
+      set_slice d s
+    end
+    else
+      d.c <-
+        (match b with
+        | ('\x00' .. '\x09' | '\x0B' | '\x0E' .. '\x7F') as u ->
+            (* ASCII fast path *)
+            d.i_next <- d.i_next + 1;
+            d.byte_count <- d.byte_count + 1;
+            Stdlib.Char.code u
+        | '\x0D' (* CR *) ->
+            d.i_next <- d.i_next + 1;
+            d.byte_count <- d.byte_count + 1;
+            d.line_start <- d.byte_count;
+            d.line <- d.line + 1;
+            0x000D
+        | '\x0A' (* LF *) ->
+            d.i_next <- d.i_next + 1;
+            d.byte_count <- d.byte_count + 1;
+            d.line_start <- d.byte_count;
+            if d.c <> 0x000D then d.line <- d.line + 1;
+            0x000A
+        | _ ->
+            let udec = Bytes.get_utf_8_uchar d.i d.i_next in
+            if not (Uchar.utf_decode_is_valid udec) then
+              err_malformed_utf_8 ~first_line ~first_byte d
+            else
+              let u = Uchar.to_int (Uchar.utf_decode_uchar udec) in
+              let ulen = Uchar.utf_decode_length udec in
+              d.i_next <- d.i_next + ulen;
+              d.byte_count <- d.byte_count + ulen;
+              u)
+
+(* let rec nextc d = *)
+(*   let first_byte = get_last_byte d and first_line = get_line_pos d in *)
+(*   let a = available d in *)
+(*   if a <= 0 then *)
+(*     if is_eod d then d.c <- eot *)
+(*     else ( *)
+(*       set_slice d (Bytes.Reader.read d.reader); *)
+(*       nextc d) *)
+(*   else *)
+(*     let b = Bytes.get d.i d.i_next in *)
+(*     d.c <- *)
+(*       (match b with *)
+(*       | ('\x00' .. '\x09' | '\x0B' | '\x0E' .. '\x7F') as u -> *)
+(*           (* ASCII fast path *) *)
+(*           d.i_next <- d.i_next + 1; *)
+(*           d.byte_count <- d.byte_count + 1; *)
+(*           Stdlib.Char.code u *)
+(*       | '\x0D' (* CR *) -> *)
+(*           d.i_next <- d.i_next + 1; *)
+(*           d.byte_count <- d.byte_count + 1; *)
+(*           d.line_start <- d.byte_count; *)
+(*           d.line <- d.line + 1; *)
+(*           0x000D *)
+(*       | '\x0A' (* LF *) -> *)
+(*           d.i_next <- d.i_next + 1; *)
+(*           d.byte_count <- d.byte_count + 1; *)
+(*           d.line_start <- d.byte_count; *)
+(*           if d.c <> 0x000D then d.line <- d.line + 1; *)
+(*           0x000A *)
+(*       | c -> *)
+(*           err_to_here ~first_line ~first_byte d *)
+(*             "Unsupported encoding, please use ASCII with LaTeX. Got %i." *)
+(*             (Stdlib.Char.code c)) *)
 
 let[@inline] token_clear d = Buffer.clear d.token
 
@@ -530,7 +630,9 @@ let[@inline] token_pop d =
   token_clear d;
   t
 
-let[@inline] token_add d u = Buffer.add_char d.token (Stdlib.Char.unsafe_chr u)
+let[@inline] token_add d u =
+  if u <= 0x7F then Buffer.add_char d.token (Stdlib.Char.unsafe_chr u)
+  else Buffer.add_utf_8_uchar d.token (Uchar.unsafe_of_int u)
 
 let[@inline] accept d =
   token_add d d.c;

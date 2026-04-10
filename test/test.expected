@@ -17,6 +17,9 @@
   month=jan,
   organization={London, UK}
 }
+@misc{somethingUnicodey,
+  status={fermé}
+}
 @article{py03,
   author={Xavier D\'ecoret},
   title="PyBiTex",
