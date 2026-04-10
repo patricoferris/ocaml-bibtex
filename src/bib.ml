@@ -653,6 +653,18 @@ let consume_kv d =
   let value = read_parts d in
   (key, value)
 
+let read_exit_delimiter d =
+  match d.c with
+  | 0x007D (* } *) ->
+      d.expect_curly <- true;
+      nextc d
+  | 0x0029 (* ) *) ->
+      d.expect_curly <- false;
+      nextc d
+  | c ->
+      let first_byte = get_last_byte d and first_line = get_line_pos d in
+      err_unexpected_character ~first_byte ~first_line c d
+
 let consume_all_kvs d =
   let first_byte = get_last_byte d and first_line = get_line_pos d in
   let rec loop acc d =
@@ -663,7 +675,12 @@ let consume_all_kvs d =
     match d.c with
     | 0x002C (* COMMA *) ->
         nextc d;
-        loop acc d
+        read_ws d;
+        if Int.equal d.c 0x007D || Int.equal d.c 0x0029 then begin
+          read_exit_delimiter d;
+          acc
+        end
+        else loop acc d
     | 0x007D when d.expect_curly (* } *) ->
         nextc d;
         d.expect_curly <- false;
@@ -688,18 +705,6 @@ let read_entry_delimiter d =
       d.expect_curly <- true;
       nextc d
   | 0x0028 (* ( *) ->
-      d.expect_curly <- false;
-      nextc d
-  | c ->
-      let first_byte = get_last_byte d and first_line = get_line_pos d in
-      err_unexpected_character ~first_byte ~first_line c d
-
-let read_exit_delimiter d =
-  match d.c with
-  | 0x007D (* { *) ->
-      d.expect_curly <- true;
-      nextc d
-  | 0x0029 (* ) *) ->
       d.expect_curly <- false;
       nextc d
   | c ->
